@@ -1,7 +1,17 @@
-# ShardSim
+# ShardSim / ChatMPI
+
 DomainSim: A Distributed Multi-Fidelity Simulation Framework with Domain-Specific Learning
 
-# ChatMPI: a distributed multi-fidelity framework for adaptive scientific simulation with domain-specialized learning
+---
+
+## 📋 Documentation
+
+- **[PHASE1_REPORT.md](PHASE1_REPORT.md)** ⭐ — Phase 1 completion snapshot: architecture, baseline performance (2.08–2.56x speedup), decision-core strategy, guardrails, test coverage, Phase 2 roadmap.
+- **[RUNNING.md](RUNNING.md)** — Execution guide: build, single-run, baseline automation, config reference.
+- **[BASELINES.md](BASELINES.md)** — Baseline configuration and CSV schema.
+- **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** — Quick feature checklist.
+
+---
 
 ## Abstract
 

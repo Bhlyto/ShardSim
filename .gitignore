@@ -1,0 +1,8 @@
+build/*
+runs/*
+models/*
+reports/*
+*.log
+*.out
+*.yaml
+*.csv
