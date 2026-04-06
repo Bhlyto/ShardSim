@@ -1,0 +1,121 @@
+{
+  "default": {
+    "solver_family": "generic_thermal",
+    "decomposition_mode": "hybrid",
+    "presim_steps": 0,
+    "presim_coarsening_factor": 4,
+    "correction_policy": "none",
+    "correction_model_path": "",
+    "launch": {
+      "parallel_preferred": false,
+      "default_nranks": 1
+    },
+    "adapters": []
+  },
+  "solvers": {
+    "solidFoam": {
+      "solver_family": "solid_heat",
+      "decomposition_mode": "hybrid",
+      "presim_steps": 50,
+      "presim_coarsening_factor": 4,
+      "correction_policy": "linear",
+      "correction_model_path": "models/surrogate_linear_policy.txt",
+      "launch": {
+        "parallel_preferred": false,
+        "default_nranks": 1
+      },
+      "adapters": [
+        "mapped_wall_single_world_fallback"
+      ]
+    },
+    "laplacianFoam": {
+      "solver_family": "diffusion",
+      "decomposition_mode": "hybrid",
+      "presim_steps": 40,
+      "presim_coarsening_factor": 4,
+      "correction_policy": "linear",
+      "correction_model_path": "models/surrogate_linear_policy.txt",
+      "launch": {
+        "parallel_preferred": false,
+        "default_nranks": 1
+      },
+      "adapters": []
+    },
+    "pisoFoam": {
+      "solver_family": "incompressible_flow",
+      "decomposition_mode": "coarse",
+      "presim_steps": 30,
+      "presim_coarsening_factor": 4,
+      "correction_policy": "none",
+      "correction_model_path": "",
+      "launch": {
+        "parallel_preferred": false,
+        "default_nranks": 1
+      },
+      "adapters": [
+        "icofoam_minimal_numerics",
+        "derive_temperature_from_velocity"
+      ]
+    },
+    "simpleFoam": {
+      "solver_family": "incompressible_flow",
+      "decomposition_mode": "coarse",
+      "presim_steps": 20,
+      "presim_coarsening_factor": 4,
+      "correction_policy": "none",
+      "correction_model_path": "",
+      "launch": {
+        "parallel_preferred": false,
+        "default_nranks": 1
+      },
+      "adapters": [
+        "icofoam_minimal_numerics",
+        "derive_temperature_from_velocity"
+      ]
+    },
+    "scalarTransportFoam": {
+      "solver_family": "diffusion",
+      "decomposition_mode": "hybrid",
+      "presim_steps": 40,
+      "presim_coarsening_factor": 4,
+      "correction_policy": "linear",
+      "correction_model_path": "models/surrogate_linear_policy.txt",
+      "launch": {
+        "parallel_preferred": false,
+        "default_nranks": 1
+      },
+      "adapters": []
+    },
+    "buoyantBoussinesqSimpleFoam": {
+      "solver_family": "buoyant_thermal",
+      "decomposition_mode": "hybrid",
+      "presim_steps": 50,
+      "presim_coarsening_factor": 4,
+      "correction_policy": "linear",
+      "correction_model_path": "models/surrogate_linear_policy.txt",
+      "launch": {
+        "parallel_preferred": false,
+        "default_nranks": 1
+      },
+      "adapters": [
+        "derive_temperature_from_velocity"
+      ]
+    },
+    "icoFoam": {
+      "solver_family": "incompressible_flow",
+      "decomposition_mode": "coarse",
+      "presim_steps": 30,
+      "presim_coarsening_factor": 4,
+      "correction_policy": "none",
+      "correction_model_path": "",
+      "launch": {
+        "parallel_preferred": true,
+        "default_nranks": 2
+      },
+      "adapters": [
+        "icofoam_minimal_numerics",
+        "derive_temperature_from_velocity"
+      ]
+    }
+  }
+}

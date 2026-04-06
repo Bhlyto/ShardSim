@@ -32,6 +32,11 @@ void exchange_halo_x(std::vector<double>& local_with_ghosts,
                      std::size_t local_nx,
                      std::size_t ny,
                      const Context& ctx);
+void exchange_halo_x_3d(std::vector<double>& local_with_ghosts,
+                        std::size_t local_nx,
+                        std::size_t ny,
+                        std::size_t nz,
+                        const Context& ctx);
 void reset_exchange_stats();
 ExchangeStats collect_exchange_stats(const Context& ctx);
 

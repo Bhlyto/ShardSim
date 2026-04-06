@@ -1,5 +1,6 @@
 #include "shardsim/orchestrator/orchestrator.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -177,12 +178,47 @@ std::optional<double> read_rss_mb_linux() {
     return std::nullopt;
 }
 
+SimulationConfig apply_runtime_overrides(SimulationConfig config) {
+    if (config.auto_enable_presim && config.presim_steps == 0 && config.auto_presim_steps > 0) {
+        config.presim_steps = config.auto_presim_steps;
+        config.presim_coarsening_factor = std::max<std::size_t>(2, config.auto_presim_coarsening_factor);
+    }
+
+    if (config.auto_enable_correction && config.correction_policy == "none") {
+        if (!config.auto_correction_policy.empty() && config.auto_correction_policy != "none") {
+            config.correction_policy = config.auto_correction_policy;
+            if (config.correction_model_path.empty()) {
+                config.correction_model_path = config.auto_correction_model_path;
+            }
+        }
+    }
+
+    if (config.decomposition_mode == "coarse") {
+        config.min_critical_fraction = 0.0;
+        if (config.correction_policy == "none" && !config.auto_correction_policy.empty() &&
+            config.auto_correction_policy != "none") {
+            config.correction_policy = config.auto_correction_policy;
+            if (config.correction_model_path.empty()) {
+                config.correction_model_path = config.auto_correction_model_path;
+            }
+        }
+    } else if (config.decomposition_mode == "fine") {
+        config.min_critical_fraction = 1.0;
+    } else if (config.decomposition_mode != "hybrid") {
+        throw std::runtime_error("Unsupported decomposition_mode: " + config.decomposition_mode);
+    }
+
+    return config;
+}
+
 }  // namespace
 
 Orchestrator::Orchestrator(SimulationConfig config) : config_(std::move(config)) {}
 
 metrics::RunSummary Orchestrator::run() const {
-    if (config_.partitioning_policy != "strict_geometric") {
+    const auto run_config = apply_runtime_overrides(config_);
+
+    if (run_config.partitioning_policy != "strict_geometric") {
         throw std::runtime_error("Only strict_geometric partitioning policy is currently supported");
     }
 
@@ -192,13 +228,10 @@ metrics::RunSummary Orchestrator::run() const {
     try {
         const auto t0 = std::chrono::steady_clock::now();
         metrics::RunSummary summary;
-        if (config_.grid_z > 1) {
-            if (mpi_ctx.world_size > 1) {
-                throw std::runtime_error("3D solver path currently supports only single-rank runs");
-            }
-            const auto grid = mesh::make_non_uniform_grid3d(config_);
-            const auto solve_result = solver::run_transient_heat(grid, config_);
-            maybe_export_training_sample(config_, solve_result, mpi_ctx);
+        if (run_config.grid_z > 1) {
+            const auto grid = mesh::make_non_uniform_grid3d(run_config);
+            const auto solve_result = solver::run_transient_heat(grid, run_config);
+            maybe_export_training_sample(run_config, solve_result, mpi_ctx);
             const auto t1 = std::chrono::steady_clock::now();
             const auto runtime_ms =
                 std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t1 - t0).count();
@@ -211,15 +244,16 @@ metrics::RunSummary Orchestrator::run() const {
                 solve_result.critical_fraction,
                 solve_result.decision_ms,
                 solve_result.halo_calls,
-                runtime_ms);
+                runtime_ms,
+                solve_result.correction_applied);
             summary.halo_ms_local = solve_result.halo_ms_local;
             summary.halo_ms_min = solve_result.halo_ms_min;
             summary.halo_ms_avg = solve_result.halo_ms_avg;
             summary.halo_ms_max = solve_result.halo_ms_max;
         } else {
-            const auto grid = mesh::make_non_uniform_grid(config_);
-            const auto solve_result = solver::run_transient_heat(grid, config_);
-            maybe_export_training_sample(config_, solve_result, mpi_ctx);
+            const auto grid = mesh::make_non_uniform_grid(run_config);
+            const auto solve_result = solver::run_transient_heat(grid, run_config);
+            maybe_export_training_sample(run_config, solve_result, mpi_ctx);
             const auto t1 = std::chrono::steady_clock::now();
             const auto runtime_ms =
                 std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t1 - t0).count();
@@ -232,23 +266,24 @@ metrics::RunSummary Orchestrator::run() const {
                 solve_result.critical_fraction,
                 solve_result.decision_ms,
                 solve_result.halo_calls,
-                runtime_ms);
+                runtime_ms,
+                solve_result.correction_applied);
             summary.halo_ms_local = solve_result.halo_ms_local;
             summary.halo_ms_min = solve_result.halo_ms_min;
             summary.halo_ms_avg = solve_result.halo_ms_avg;
             summary.halo_ms_max = solve_result.halo_ms_max;
         }
 
-        const double wallclock_limit_ms = (config_.wallclock_limit_ms > 0)
-            ? static_cast<double>(config_.wallclock_limit_ms)
-            : static_cast<double>(config_.wallclock_limit_minutes) * 60.0 * 1000.0;
+        const double wallclock_limit_ms = (run_config.wallclock_limit_ms > 0)
+            ? static_cast<double>(run_config.wallclock_limit_ms)
+            : static_cast<double>(run_config.wallclock_limit_minutes) * 60.0 * 1000.0;
         if (wallclock_limit_ms > 0.0 && summary.runtime_ms > wallclock_limit_ms) {
             throw std::runtime_error("Wall-clock limit exceeded");
         }
 
-        const double memory_limit_mb = (config_.memory_ceiling_mb > 0)
-            ? static_cast<double>(config_.memory_ceiling_mb)
-            : static_cast<double>(config_.memory_ceiling_gb) * 1024.0;
+        const double memory_limit_mb = (run_config.memory_ceiling_mb > 0)
+            ? static_cast<double>(run_config.memory_ceiling_mb)
+            : static_cast<double>(run_config.memory_ceiling_gb) * 1024.0;
         if (memory_limit_mb > 0.0) {
             const auto rss_mb = read_rss_mb_linux();
             if (rss_mb.has_value() && rss_mb.value() > memory_limit_mb) {
@@ -256,10 +291,10 @@ metrics::RunSummary Orchestrator::run() const {
             }
         }
 
-        if (config_.halo_overhead_ratio_max > 0.0) {
+        if (run_config.halo_overhead_ratio_max > 0.0) {
             const double runtime = (summary.runtime_ms > 1.0e-12) ? summary.runtime_ms : 1.0e-12;
             const double ratio = summary.halo_ms_avg / runtime;
-            if (ratio > config_.halo_overhead_ratio_max) {
+            if (ratio > run_config.halo_overhead_ratio_max) {
                 throw std::runtime_error("Halo overhead ratio exceeded configured maximum");
             }
         }

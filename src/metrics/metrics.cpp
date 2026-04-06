@@ -14,7 +14,8 @@ RunSummary summarize(const Field2D& coarse,
                      double critical_fraction,
                      double decision_ms,
                      std::size_t halo_calls,
-                     double runtime_ms) {
+                     double runtime_ms,
+                     bool correction_applied) {
     if (coarse.size.x != fine.size.x || coarse.size.y != fine.size.y) {
         throw std::runtime_error("Metric computation requires same field dimensions");
     }
@@ -36,6 +37,7 @@ RunSummary summarize(const Field2D& coarse,
             0.0,
             0.0,
             0.0,
+            correction_applied,
         };
     }
 
@@ -70,6 +72,7 @@ RunSummary summarize(const Field2D& coarse,
         0.0,
         mae,
         global_error_norm,
+        correction_applied,
     };
 }
 
@@ -81,7 +84,8 @@ RunSummary summarize(const Field3D& coarse,
                      double critical_fraction,
                      double decision_ms,
                      std::size_t halo_calls,
-                     double runtime_ms) {
+                     double runtime_ms,
+                     bool correction_applied) {
     if (coarse.size.x != fine.size.x || coarse.size.y != fine.size.y || coarse.size.z != fine.size.z) {
         throw std::runtime_error("Metric computation requires same field dimensions");
     }
@@ -103,6 +107,7 @@ RunSummary summarize(const Field3D& coarse,
             0.0,
             0.0,
             0.0,
+            correction_applied,
         };
     }
 
@@ -137,6 +142,7 @@ RunSummary summarize(const Field3D& coarse,
         0.0,
         mae,
         global_error_norm,
+        correction_applied,
     };
 }
 

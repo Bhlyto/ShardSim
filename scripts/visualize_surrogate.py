@@ -10,7 +10,7 @@ Generates a comprehensive dashboard showing:
   5. Cumulative error curve: sorted abs error across cells
 
 Usage:
-    source /home/bhlyto/.venv/bin/activate
+    source <venv>/bin/activate
     python3 scripts/visualize_surrogate.py --model models/surrogate_256x256_cuda.pkl \
                                             --grid-size 256 --n-samples 40 \
                                             --output reports/surrogate_eval.png

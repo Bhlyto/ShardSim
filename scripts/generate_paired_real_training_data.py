@@ -10,7 +10,7 @@ For each scenario:
     scenario_XXXX_fullfine.bin
 
 Usage:
-  /home/bhlyto/.venv/bin/python scripts/generate_paired_real_training_data.py \
+    python scripts/generate_paired_real_training_data.py \
     --n-scenarios 32 \
     --output-dir runs/training_pairs
 

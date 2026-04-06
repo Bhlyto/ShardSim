@@ -128,6 +128,55 @@ void exchange_halo_x(std::vector<double>& local_with_ghosts,
 #endif
 }
 
+void exchange_halo_x_3d(std::vector<double>& local_with_ghosts,
+                        std::size_t local_nx,
+                        std::size_t ny,
+                        std::size_t nz,
+                        const Context& ctx) {
+    if (local_nx == 0 || ny == 0 || nz == 0 || ctx.world_size <= 1) {
+        return;
+    }
+
+#if SHARDSIM_HAS_MPI
+    const auto t0 = std::chrono::steady_clock::now();
+
+    // Local storage is x-major: plane size = ny*nz.
+    // Left ghost i=0  → offset 0          (size ny*nz, contiguous)
+    // Left inner i=1  → offset ny*nz      (contiguous)
+    // Right inner i=local_nx → offset local_nx*ny*nz (contiguous)
+    // Right ghost i=local_nx+1 → offset (local_nx+1)*ny*nz (contiguous)
+    const std::size_t plane = ny * nz;
+
+    const int left_rank  = (ctx.world_rank > 0)                          ? (ctx.world_rank - 1) : MPI_PROC_NULL;
+    const int right_rank = (ctx.world_rank + 1 < ctx.world_size)         ? (ctx.world_rank + 1) : MPI_PROC_NULL;
+
+    // Send left inner plane to left neighbour; receive our right ghost from right neighbour.
+    MPI_Sendrecv(local_with_ghosts.data() + plane,
+                 static_cast<int>(plane), MPI_DOUBLE, left_rank,  100,
+                 local_with_ghosts.data() + (local_nx + 1) * plane,
+                 static_cast<int>(plane), MPI_DOUBLE, right_rank, 100,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    // Send right inner plane to right neighbour; receive our left ghost from left neighbour.
+    MPI_Sendrecv(local_with_ghosts.data() + local_nx * plane,
+                 static_cast<int>(plane), MPI_DOUBLE, right_rank, 101,
+                 local_with_ghosts.data(),
+                 static_cast<int>(plane), MPI_DOUBLE, left_rank,  101,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    const auto t1 = std::chrono::steady_clock::now();
+    g_exchange_time_ms +=
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t1 - t0).count();
+    ++g_exchange_calls;
+#else
+    (void)local_with_ghosts;
+    (void)local_nx;
+    (void)ny;
+    (void)nz;
+    (void)ctx;
+#endif
+}
+
 void reset_exchange_stats() {
     g_exchange_calls = 0;
     g_exchange_time_ms = 0.0;

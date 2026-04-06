@@ -115,6 +115,10 @@ SimulationConfig load_config(const std::string& path) {
     assign_if_present(kv, "source2_y_fraction", config.source2_y_fraction);
     assign_if_present(kv, "source2_z_fraction", config.source2_z_fraction);
     assign_if_present(kv, "source2_temperature", config.source2_temperature);
+    assign_if_present(kv, "presim_steps", config.presim_steps);
+    assign_if_present(kv, "presim_coarsening_factor", config.presim_coarsening_factor);
+    assign_if_present(kv, "auto_presim_steps", config.auto_presim_steps);
+    assign_if_present(kv, "auto_presim_coarsening_factor", config.auto_presim_coarsening_factor);
 
     const auto det = kv.find("deterministic_mode");
     if (det != kv.end()) {
@@ -129,6 +133,16 @@ SimulationConfig load_config(const std::string& path) {
     const auto decision = kv.find("decision_policy");
     if (decision != kv.end()) {
         config.decision_policy = decision->second;
+    }
+
+    const auto solver_family = kv.find("solver_family");
+    if (solver_family != kv.end()) {
+        config.solver_family = solver_family->second;
+    }
+
+    const auto decomposition_mode = kv.find("decomposition_mode");
+    if (decomposition_mode != kv.end()) {
+        config.decomposition_mode = decomposition_mode->second;
     }
 
     const auto export_training = kv.find("export_training_data");
@@ -166,6 +180,46 @@ SimulationConfig load_config(const std::string& path) {
     if (source2_enabled != kv.end()) {
         config.source2_enabled =
             (source2_enabled->second == "true" || source2_enabled->second == "1");
+    }
+
+    const auto auto_presim_enabled = kv.find("auto_enable_presim");
+    if (auto_presim_enabled != kv.end()) {
+        config.auto_enable_presim =
+            (auto_presim_enabled->second == "true" || auto_presim_enabled->second == "1");
+    }
+
+    const auto auto_correction_enabled = kv.find("auto_enable_correction");
+    if (auto_correction_enabled != kv.end()) {
+        config.auto_enable_correction =
+            (auto_correction_enabled->second == "true" || auto_correction_enabled->second == "1");
+    }
+
+    // Phase 4: ML correction loop.
+    const auto correction_policy = kv.find("correction_policy");
+    if (correction_policy != kv.end()) {
+        config.correction_policy = correction_policy->second;
+    }
+    const auto correction_model = kv.find("correction_model_path");
+    if (correction_model != kv.end()) {
+        config.correction_model_path = correction_model->second;
+    }
+    const auto correction_script = kv.find("correction_script_path");
+    if (correction_script != kv.end()) {
+        config.correction_script_path = correction_script->second;
+    }
+    const auto correction_python = kv.find("correction_python_executable");
+    if (correction_python != kv.end()) {
+        config.correction_python_executable = correction_python->second;
+    }
+
+    const auto auto_correction_policy = kv.find("auto_correction_policy");
+    if (auto_correction_policy != kv.end()) {
+        config.auto_correction_policy = auto_correction_policy->second;
+    }
+
+    const auto auto_correction_model = kv.find("auto_correction_model_path");
+    if (auto_correction_model != kv.end()) {
+        config.auto_correction_model_path = auto_correction_model->second;
     }
 
     return config;

@@ -156,6 +156,8 @@ def main() -> None:
     parser.add_argument('--paired-data-dir', required=True)
     parser.add_argument('--model-output', default='models/surrogate_3d.pkl')
     parser.add_argument('--test-split', type=float, default=0.2)
+    parser.add_argument('--split-mode', choices=['random', 'ordered'], default='random')
+    parser.add_argument('--split-seed', type=int, default=20260406)
     parser.add_argument('--num-rounds', type=int, default=180)
     parser.add_argument('--max-depth', type=int, default=6)
     parser.add_argument('--learning-rate', type=float, default=0.1)
@@ -165,12 +167,32 @@ def main() -> None:
     logger.info("3D ML SURROGATE — local-patch XGBoost (device=cuda)")
     coarse, disc = load_paired_solver_training_data_3d(args.paired_data_dir)
     n = coarse.shape[0]
+    if n < 2:
+        raise ValueError("Need at least 2 paired 3D scenarios for train/holdout split")
     n_test = max(1, int(round(n * args.test_split)))
     n_train = max(1, n - n_test)
-    coarse_train, coarse_test = coarse[:n_train], coarse[n_train:]
-    disc_train, disc_test = disc[:n_train], disc[n_train:]
-    if coarse_test.shape[0] == 0:
-        coarse_test, disc_test = coarse_train, disc_train
+    if n_train >= n:
+        n_train = n - 1
+        n_test = 1
+
+    if args.split_mode == 'random':
+        rng = np.random.default_rng(args.split_seed)
+        order = rng.permutation(n)
+    else:
+        order = np.arange(n)
+
+    train_idx = order[:n_train]
+    test_idx = order[n_train:n_train + n_test]
+    coarse_train, coarse_test = coarse[train_idx], coarse[test_idx]
+    disc_train, disc_test = disc[train_idx], disc[test_idx]
+
+    logger.info(
+        "3D split: mode=%s seed=%d train=%d test=%d",
+        args.split_mode,
+        args.split_seed,
+        coarse_train.shape[0],
+        coarse_test.shape[0],
+    )
 
     t0 = time.perf_counter()
     X_train = extract_patches_3d(coarse_train)
@@ -216,6 +238,10 @@ def main() -> None:
             'max_depth': args.max_depth,
             'learning_rate': args.learning_rate,
             'active_threshold': args.active_threshold,
+            'split_mode': args.split_mode,
+            'split_seed': args.split_seed,
+            'train_scenarios': int(coarse_train.shape[0]),
+            'test_scenarios': int(coarse_test.shape[0]),
         },
     )
 

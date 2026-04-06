@@ -23,6 +23,7 @@ int main(int argc, char** argv) {
             std::cout << "  critical_cells: " << summary.critical_cells << "\n";
             std::cout << "  critical_fraction: " << summary.critical_fraction << "\n";
             std::cout << "  decision_ms: " << summary.decision_ms << "\n";
+            std::cout << "  correction_applied: " << (summary.correction_applied ? "true" : "false") << "\n";
             std::cout << "  halo_calls: " << summary.halo_calls << "\n";
             std::cout << "  runtime_ms: " << summary.runtime_ms << "\n";
             std::cout << "  halo_ms_local: " << summary.halo_ms_local << "\n";
