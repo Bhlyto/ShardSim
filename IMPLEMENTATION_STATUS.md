@@ -1,6 +1,6 @@
 # Implementation Status
 
-Date: 2026-04-06
+Last updated: 2026-04-06
 
 ## Phase 1 — Complete ✅
 
@@ -69,6 +69,24 @@ Three decision policies are available via the `decision_policy` config key:
 | `heuristic`        | ✅ Default | Gradient + Laplacian proxies; no external deps |
 | `surrogate_python` | 🔄 Working | Shells out to `scripts/predict_critical_mask.py`; requires XGBoost model |
 | `surrogate_linear` | 🔄 Working | Native in-process linear regression; requires pre-trained weight file |
+## Phase 1+ — Complete ✅
+
+### ML Surrogate Integration
+Four decision policies are available via the `decision_policy` config key:
+
+| Policy                    | Status | Notes |
+|---------------------------|--------|-------|
+| `heuristic`               | ✅ Default | Gradient + Laplacian proxies; no external deps |
+| `surrogate_python`        | ✅ Working | One-shot subprocess to `predict_critical_mask.py`; XGBoost model |
+| `surrogate_python_cached` | ✅ Working | Persistent worker process over stdio JSON protocol; eliminates per-step startup; 2D + 3D |
+| `surrogate_linear`        | ✅ Working | Native in-process linear regression; requires pre-trained weight file |
+
+**Cached worker path** (`surrogate_python_cached`):
+- Spawns `predict_critical_mask.py --worker-stdio` once at solver start.
+- Each step sends a JSON request over stdin and reads a JSON response from stdout.
+- Falls back to one-shot mode if the worker process fails.
+- Supported in both 2D (`heat_solver.cpp`) and 3D (`heat_solver3d.cpp`).
+- Single-rank only for 3D; no restriction on rank count for 2D.
 
 Training pipelines (Python):
 - `train_surrogate.py` — XGBoost two-stage trainer (GPU preferred).

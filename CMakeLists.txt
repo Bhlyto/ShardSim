@@ -12,6 +12,7 @@ option(SHARDSIM_DETERMINISTIC_MODE "Enable deterministic behavior where possible
 find_package(MPI QUIET)
 
 add_library(shardsim_core
+    src/correction/correction.cpp
     src/decision_core/policy.cpp
     src/io/config_loader.cpp
     src/mesh/mesh.cpp
@@ -19,6 +20,7 @@ add_library(shardsim_core
     src/metrics/metrics.cpp
     src/mpi/mpi_runtime.cpp
     src/orchestrator/orchestrator.cpp
+    src/presim/presim.cpp
     src/solver/heat_solver.cpp
     src/solver/heat_solver3d.cpp
 )
@@ -63,6 +65,10 @@ if(BUILD_TESTING)
     target_link_libraries(shardsim_policy_fail_test PRIVATE shardsim_core)
 
     add_test(NAME shardsim_partition_halo_single COMMAND shardsim_partition_halo_test)
+        add_executable(shardsim_solver3d_mpi_test tests/solver3d_mpi_test.cpp)
+        target_link_libraries(shardsim_solver3d_mpi_test PRIVATE shardsim_core)
+
+        add_test(NAME shardsim_solver3d_single COMMAND shardsim_solver3d_mpi_test)
     add_test(NAME shardsim_kpi_guardrail_single COMMAND shardsim_kpi_guardrail_test)
     add_test(NAME shardsim_decision_core_policy_single COMMAND shardsim_decision_core_policy_test)
     add_test(NAME shardsim_mesh3d_smoke_single COMMAND shardsim_mesh3d_smoke_test)
@@ -74,10 +80,26 @@ if(BUILD_TESTING)
         PROPERTIES
             WILL_FAIL TRUE)
 
+    add_executable(shardsim_presim_test tests/presim_test.cpp)
+    target_link_libraries(shardsim_presim_test PRIVATE shardsim_core)
+    add_test(NAME shardsim_presim_single COMMAND shardsim_presim_test)
+
+    add_executable(shardsim_correction_test tests/correction_test.cpp)
+    target_link_libraries(shardsim_correction_test PRIVATE shardsim_core)
+    target_compile_definitions(shardsim_correction_test PRIVATE
+        SHARDSIM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME shardsim_correction_single COMMAND shardsim_correction_test)
+
     if(MPI_FOUND)
         add_test(
             NAME shardsim_partition_halo_mpi2
             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:shardsim_partition_halo_test>)
+            add_test(
+                NAME shardsim_solver3d_mpi2
+                COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:shardsim_solver3d_mpi_test>)
+            add_test(
+                NAME shardsim_solver3d_mpi4
+                COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:shardsim_solver3d_mpi_test>)
         add_test(
             NAME shardsim_kpi_guardrail_mpi2
             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:shardsim_kpi_guardrail_test>)

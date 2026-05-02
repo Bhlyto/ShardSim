@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "shardsim/correction/correction.hpp"
 #include "shardsim/decision_core/policy.hpp"
 #include "shardsim/mpi/mpi_runtime.hpp"
 
@@ -290,12 +291,42 @@ SolveResult run_transient_heat(const mesh::Grid2D& grid, const SimulationConfig&
     const auto ctx = shardsim::mpi_runtime::initialize();
     shardsim::mpi_runtime::reset_exchange_stats();
 
-    if (config.decision_policy == "surrogate_python" && ctx.world_size > 1) {
-        throw std::runtime_error("decision_policy=surrogate_python currently supports only single-rank runs");
+    if ((config.decision_policy == "surrogate_python" ||
+         config.decision_policy == "surrogate_python_cached") &&
+        ctx.world_size > 1) {
+        throw std::runtime_error(
+            "decision_policy=surrogate_python(_cached) currently supports only single-rank runs");
     }
 
     auto coarse = solve_explicit_until_tolerance(
         grid, config, config.steps, config.dt, config.alpha, config.coarse_tolerance, ctx, nullptr, nullptr);
+
+    // Phase 4: ML correction loop.
+    // When correction_policy != "none", apply the trained correction model to
+    // the coarse field instead of running the full fine solve.
+    if (config.correction_policy != "none" && !config.correction_policy.empty()) {
+        const auto select_begin = std::chrono::steady_clock::now();
+        const auto selection = shardsim::decision_core::select_critical_regions(grid, coarse.first, config);
+        const auto select_end = std::chrono::steady_clock::now();
+
+        out.coarse = coarse.first;
+        out.fine = shardsim::correction::apply_correction(coarse.first, config);
+        out.coarse_steps = coarse.second;
+        out.fine_steps = 0;
+        out.critical_cells = selection.critical_cells;
+        out.critical_fraction = selection.critical_fraction;
+        out.decision_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+            select_end - select_begin).count();
+        out.correction_applied = true;
+
+        const auto halo_stats = shardsim::mpi_runtime::collect_exchange_stats(ctx);
+        out.halo_calls = halo_stats.calls;
+        out.halo_ms_local = halo_stats.local_ms;
+        out.halo_ms_min = halo_stats.min_ms;
+        out.halo_ms_avg = halo_stats.avg_ms;
+        out.halo_ms_max = halo_stats.max_ms;
+        return out;
+    }
 
     const auto select_begin = std::chrono::steady_clock::now();
     const auto selection = shardsim::decision_core::select_critical_regions(grid, coarse.first, config);

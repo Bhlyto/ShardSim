@@ -16,7 +16,7 @@ GPU Requirements:
     pip install xgboost --index-url https://pypi.nvidia.com --extra-index-url https://pypi.org/simple/
 
 Usage:
-    source /home/bhlyto/.venv/bin/activate
+    source <venv>/bin/activate
     python3 scripts/train_surrogate.py --grid-size 256 --n-samples 200 \
                                         --model-output models/surrogate_256x256_cuda.pkl
 """

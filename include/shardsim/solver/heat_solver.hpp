@@ -15,6 +15,7 @@ struct SolveResult {
     std::size_t critical_cells {0};
     double critical_fraction {0.0};
     double decision_ms {0.0};
+    bool correction_applied {false};
     std::size_t halo_calls {0};
     double halo_ms_local {0.0};
     double halo_ms_min {0.0};
@@ -30,6 +31,7 @@ struct SolveResult3D {
     std::size_t critical_cells {0};
     double critical_fraction {0.0};
     double decision_ms {0.0};
+    bool correction_applied {false};
     std::size_t halo_calls {0};
     double halo_ms_local {0.0};
     double halo_ms_min {0.0};

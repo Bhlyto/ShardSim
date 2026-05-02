@@ -307,7 +307,7 @@ halo_overhead_ratio_max: 0.05      # ≤ 5% communication overhead
 ### 7.1 Full Integration Build
 
 ```bash
-cd /home/bhlyto/ShardSim
+cd /path/to/ShardSim
 cmake -S . -B build
 cmake --build build -j
 ctest --test-dir build --output-on-failure

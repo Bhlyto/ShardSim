@@ -71,7 +71,7 @@ Relevant config keys:
 ## Train Surrogate From Real Solver Data
 
 ```bash
-source /home/bhlyto/.venv/bin/activate
+source <venv>/bin/activate
 python3 scripts/train_surrogate.py \
 	--grid-size 256 \
 	--data-dir runs/training_data \
@@ -87,7 +87,7 @@ The command below generates diverse scenarios (varying source position and tempe
 - `scenario_XXXX_fullfine.bin` from full-fine reference run
 
 ```bash
-/home/bhlyto/.venv/bin/python scripts/generate_paired_real_training_data.py \
+python3 scripts/generate_paired_real_training_data.py \
 	--n-scenarios 32 \
 	--output-dir runs/training_pairs
 ```
@@ -183,10 +183,49 @@ This now benchmarks four live policies:
 
 It writes CSV/logs under `runs/surrogate_policy_benchmark/<timestamp>/`.
 
+## Iterative OpenFOAM Active Learning Loop
+
+You can now run a continual learning cycle that:
+1. runs OpenFOAM vs ShardSim on one case,
+2. builds paired coarse/openfoam-normalized training samples,
+3. appends samples to a global dataset,
+4. retrains a surrogate model,
+5. repeats across cases/iterations,
+6. picks the best model and emits a ready decision-core config snippet.
+
+Command:
+
+```bash
+python3 scripts/iterative_openfoam_active_learning.py \
+	--cases \
+		runs/openfoam_cases/solid1 \
+		runs/openfoam_cases/cavity_volField \
+	--iterations 3 \
+	--import-mode permissive \
+	--two-stage \
+	--early-stop-metric mae \
+	--early-stop-min-improvement 0.0001 \
+	--early-stop-patience-rounds 3 \
+	--early-stop-min-rounds 3
+```
+
+Main outputs:
+- `runs/iterative_learning/paired_dataset/` (accumulated dataset)
+- `runs/iterative_learning/models/` (one model per round)
+- `runs/iterative_learning/reports/iterative_training_history.json`
+- `runs/iterative_learning/reports/recommended_decision_core_surrogate.yaml`
+
+Early-stopping behavior:
+- Monitors validation metric (`mae` by default).
+- Stops automatically when improvement is below threshold for `patience` rounds.
+- Prevents endless retraining once gains saturate.
+
+Use the recommended config values in your ShardSim run to activate model-based decision core selection (`decision_policy: surrogate_python`).
+
 To train the native linear patch selector directly:
 
 ```bash
-/home/bhlyto/.venv/bin/python scripts/train_linear_policy.py \
+python3 scripts/train_linear_policy.py \
 	--paired-data-dir runs/hardened_id_train \
 	--model-output models/surrogate_linear_policy.txt
 ```
@@ -199,6 +238,12 @@ To compare B, Python-C, and native-linear-C directly against a same-scenario ful
 
 ```bash
 bash scripts/benchmark_policy_reference.sh
+```
+
+To run a deterministic scenario sweep instead of a single scenario:
+
+```bash
+N_SCENARIOS=12 SCENARIO_SEED=20260406 bash scripts/benchmark_policy_reference.sh
 ```
 
 This writes:
@@ -235,9 +280,50 @@ Defaults:
 - `TRAIN_SCENARIOS=24`
 - `EVAL_SCENARIOS=8`
 
+The 3D trainer defaults to randomized holdout splitting. You can control split behavior explicitly:
+
+```bash
+python3 scripts/train_surrogate_3d.py \
+	--paired-data-dir runs/training_pairs_3d_train \
+	--split-mode random \
+	--split-seed 20260406 \
+	--model-output models/surrogate_3d.pkl
+```
+
 The 3D path currently supports only `decision_policy: heuristic` and single-rank runs.
 
 Config keys prepared for 3D workflows:
 - `grid_z`
 - `source_z_fraction`
 - `source2_z_fraction`
+
+## OpenFOAM Case Import (Scaffold)
+
+To ingest an OpenFOAM case into a canonical ShardSim YAML spec:
+
+```bash
+python3 scripts/import_openfoam_case.py \
+	--case-dir /path/to/openfoam_case \
+	--output config/imported_openfoam_case.yaml \
+	--mode permissive
+```
+
+Strict validation mode fails fast when required source files are missing:
+
+```bash
+python3 scripts/import_openfoam_case.py \
+	--case-dir /path/to/openfoam_case \
+	--output config/imported_openfoam_case.yaml \
+	--mode strict
+```
+
+Outputs:
+- Canonical case file: `config/imported_openfoam_case.yaml`
+- Conversion report: `config/imported_openfoam_case.report.json`
+
+Current scope of the importer:
+- Parses OpenFOAM `constant/polyMesh/boundary` patches.
+- Extracts counts from `points/faces/owner/neighbour` when available.
+- Reads run-control values from `system/controlDict`.
+- Reads transport hints from `constant/transportProperties`.
+- Captures provenance and conversion warnings for traceability.

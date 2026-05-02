@@ -21,6 +21,7 @@ struct RunSummary {
     double halo_ms_max {0.0};
     double mae {0.0};
     double global_error_norm {0.0};
+    bool correction_applied {false};
 };
 
 RunSummary summarize(const Field2D& coarse,
@@ -31,7 +32,8 @@ RunSummary summarize(const Field2D& coarse,
                      double critical_fraction,
                      double decision_ms,
                      std::size_t halo_calls,
-                     double runtime_ms);
+                     double runtime_ms,
+                     bool correction_applied = false);
 
 RunSummary summarize(const Field3D& coarse,
                      const Field3D& fine,
@@ -41,6 +43,7 @@ RunSummary summarize(const Field3D& coarse,
                      double critical_fraction,
                      double decision_ms,
                      std::size_t halo_calls,
-                     double runtime_ms);
+                     double runtime_ms,
+                     bool correction_applied = false);
 
 }  // namespace shardsim::metrics

@@ -174,3 +174,28 @@ Suggested minimal team:
 - Fast prototype: 6-8 weeks (reduced validation/hardening)
 - Robust v1: ~16 weeks (full plan above)
 - Extended publication-grade program: 4-6 months
+
+## 9) Post-v1 Extensibility Track (Geometry/External Case Import)
+Objective:
+- Allow potential users to import external simulation cases (starting with OpenFOAM) and run them through a unified ShardSim workflow without rewriting orchestration.
+
+Planned approach:
+- Introduce a canonical ShardSim case schema (YAML/JSON) as the single runtime input format.
+- Build an importer/translator CLI for OpenFOAM that converts case data into canonical schema.
+- Keep solver-specific parsing isolated in adapters; keep workflow/orchestration physics-agnostic.
+
+Planned deliverables:
+- `import-openfoam` script/app:
+  - Input: OpenFOAM case directory (`constant/polyMesh`, `0/`, `system/`).
+  - Output: canonical ShardSim case YAML + conversion report.
+- Schema and mapping docs:
+  - Geometry/topology, BCs, material/transport properties, initial fields, solver controls.
+  - Provenance fields (`source_format`, `source_path`, `schema_version`, conversion warnings).
+- Validation modes:
+  - Strict mode (fail on unsupported constructs).
+  - Permissive mode (warn + default fallbacks).
+
+Integration notes:
+- Runtime should consume only canonical schema regardless of source tool.
+- OpenFOAM support is an ingestion layer, not a hard dependency for execution.
+- Future CFD backend can be added via solver plugin/adapter interface rather than platform rewrite.

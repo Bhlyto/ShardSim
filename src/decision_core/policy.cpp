@@ -5,14 +5,21 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <csignal>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <numeric>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "shardsim/presim/presim.hpp"
 
 namespace shardsim::decision_core {
 
@@ -22,6 +29,10 @@ constexpr std::uint32_t kCoarseFieldMagic2D = 0x31434453;  // "SDC1"
 constexpr std::uint32_t kCoarseFieldVersion2D = 1;
 constexpr std::uint32_t kMaskMagic2D = 0x314d4453;         // "SDM1"
 constexpr std::uint32_t kMaskVersion2D = 1;
+constexpr std::uint32_t kCoarseFieldMagic3D = 0x33434453;  // "SDC3"
+constexpr std::uint32_t kCoarseFieldVersion3D = 1;
+constexpr std::uint32_t kMaskMagic3D = 0x334d4453;         // "SDM3"
+constexpr std::uint32_t kMaskVersion3D = 1;
 
 struct LinearPatchModel2D {
     std::size_t patch_radius {0};
@@ -76,6 +87,267 @@ std::string shell_quote(const std::string& value) {
     }
     quoted.push_back('\'');
     return quoted;
+}
+
+std::string json_escape(const std::string& value) {
+    std::string out;
+    out.reserve(value.size() + 8);
+    for (const char ch : value) {
+        switch (ch) {
+        case '\\':
+            out += "\\\\";
+            break;
+        case '"':
+            out += "\\\"";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            out.push_back(ch);
+            break;
+        }
+    }
+    return out;
+}
+
+std::string parse_worker_error(const std::string& response) {
+    const std::string key = "\"error\":";
+    const auto pos = response.find(key);
+    if (pos == std::string::npos) {
+        return "unknown worker error";
+    }
+    const auto start = response.find('"', pos + key.size());
+    if (start == std::string::npos) {
+        return "unknown worker error";
+    }
+    std::string error;
+    bool escaped = false;
+    for (std::size_t i = start + 1; i < response.size(); ++i) {
+        const char ch = response[i];
+        if (escaped) {
+            switch (ch) {
+            case 'n':
+                error.push_back('\n');
+                break;
+            case 'r':
+                error.push_back('\r');
+                break;
+            case 't':
+                error.push_back('\t');
+                break;
+            case '"':
+            case '\\':
+                error.push_back(ch);
+                break;
+            default:
+                error.push_back(ch);
+                break;
+            }
+            escaped = false;
+            continue;
+        }
+        if (ch == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (ch == '"') {
+            break;
+        }
+        error.push_back(ch);
+    }
+    return error.empty() ? "unknown worker error" : error;
+}
+
+class PythonSurrogateWorker {
+public:
+    PythonSurrogateWorker() = default;
+    ~PythonSurrogateWorker() {
+        stop();
+    }
+
+    PythonSurrogateWorker(const PythonSurrogateWorker&) = delete;
+    PythonSurrogateWorker& operator=(const PythonSurrogateWorker&) = delete;
+
+    void run_inference(const SimulationConfig& config,
+                       const std::filesystem::path& coarse_path,
+                       const std::filesystem::path& mask_path,
+                       double min_fraction,
+                       double score_threshold) {
+        ensure_started(config);
+
+        std::ostringstream request;
+        request << "{\"input\":\"" << json_escape(coarse_path.string())
+                << "\",\"output\":\"" << json_escape(mask_path.string())
+                << "\",\"min_fraction\":" << min_fraction
+                << ",\"score_threshold\":" << score_threshold
+                << "}";
+
+        if (std::fprintf(to_worker_, "%s\n", request.str().c_str()) < 0 || std::fflush(to_worker_) != 0) {
+            stop();
+            throw std::runtime_error("Failed to send request to surrogate worker");
+        }
+
+        char response[8192] = {0};
+        if (std::fgets(response, static_cast<int>(sizeof(response)), from_worker_) == nullptr) {
+            stop();
+            throw std::runtime_error("Surrogate worker exited before sending response");
+        }
+
+        const std::string response_line(response);
+        if (response_line.find("\"ok\": true") != std::string::npos ||
+            response_line.find("\"ok\":true") != std::string::npos) {
+            return;
+        }
+
+        const std::string worker_error = parse_worker_error(response_line);
+        stop();
+        throw std::runtime_error("Surrogate worker inference failed: " + worker_error);
+    }
+
+private:
+    void ensure_started(const SimulationConfig& config) {
+        const bool same_config = running_ &&
+            cached_python_ == config.surrogate_python_executable &&
+            cached_script_ == config.surrogate_script_path &&
+            cached_model_ == config.surrogate_model_path;
+        if (same_config) {
+            return;
+        }
+
+        stop();
+
+        int to_child[2] = {-1, -1};
+        int from_child[2] = {-1, -1};
+        if (pipe(to_child) != 0 || pipe(from_child) != 0) {
+            if (to_child[0] >= 0) {
+                close(to_child[0]);
+            }
+            if (to_child[1] >= 0) {
+                close(to_child[1]);
+            }
+            if (from_child[0] >= 0) {
+                close(from_child[0]);
+            }
+            if (from_child[1] >= 0) {
+                close(from_child[1]);
+            }
+            throw std::runtime_error("Failed to create pipes for surrogate worker");
+        }
+
+        const pid_t child = fork();
+        if (child < 0) {
+            close(to_child[0]);
+            close(to_child[1]);
+            close(from_child[0]);
+            close(from_child[1]);
+            throw std::runtime_error("Failed to fork surrogate worker process");
+        }
+
+        if (child == 0) {
+            dup2(to_child[0], STDIN_FILENO);
+            dup2(from_child[1], STDOUT_FILENO);
+            close(to_child[0]);
+            close(to_child[1]);
+            close(from_child[0]);
+            close(from_child[1]);
+
+            const std::string model_arg = config.surrogate_model_path;
+            const std::string script_arg = config.surrogate_script_path;
+            const std::string worker_flag = "--worker-stdio";
+            const std::string model_flag = "--model";
+
+            execlp(config.surrogate_python_executable.c_str(),
+                   config.surrogate_python_executable.c_str(),
+                   script_arg.c_str(),
+                   worker_flag.c_str(),
+                   model_flag.c_str(),
+                   model_arg.c_str(),
+                   static_cast<char*>(nullptr));
+            _exit(127);
+        }
+
+        close(to_child[0]);
+        close(from_child[1]);
+
+        to_worker_ = fdopen(to_child[1], "w");
+        from_worker_ = fdopen(from_child[0], "r");
+        if (to_worker_ == nullptr || from_worker_ == nullptr) {
+            if (to_worker_ != nullptr) {
+                fclose(to_worker_);
+                to_worker_ = nullptr;
+            } else {
+                close(to_child[1]);
+            }
+            if (from_worker_ != nullptr) {
+                fclose(from_worker_);
+                from_worker_ = nullptr;
+            } else {
+                close(from_child[0]);
+            }
+            kill(child, SIGTERM);
+            waitpid(child, nullptr, 0);
+            throw std::runtime_error("Failed to attach surrogate worker pipes");
+        }
+
+        setvbuf(to_worker_, nullptr, _IOLBF, 0);
+        setvbuf(from_worker_, nullptr, _IOLBF, 0);
+        pid_ = child;
+        running_ = true;
+        cached_python_ = config.surrogate_python_executable;
+        cached_script_ = config.surrogate_script_path;
+        cached_model_ = config.surrogate_model_path;
+    }
+
+    void stop() {
+        if (!running_) {
+            return;
+        }
+
+        if (to_worker_ != nullptr) {
+            std::fprintf(to_worker_, "{\"command\":\"shutdown\"}\n");
+            std::fflush(to_worker_);
+            fclose(to_worker_);
+            to_worker_ = nullptr;
+        }
+        if (from_worker_ != nullptr) {
+            fclose(from_worker_);
+            from_worker_ = nullptr;
+        }
+        if (pid_ > 0) {
+            int status = 0;
+            const pid_t waited = waitpid(pid_, &status, WNOHANG);
+            if (waited == 0) {
+                kill(pid_, SIGTERM);
+                waitpid(pid_, &status, 0);
+            }
+        }
+
+        running_ = false;
+        pid_ = -1;
+        cached_python_.clear();
+        cached_script_.clear();
+        cached_model_.clear();
+    }
+
+    pid_t pid_ {-1};
+    FILE* to_worker_ {nullptr};
+    FILE* from_worker_ {nullptr};
+    bool running_ {false};
+    std::string cached_python_;
+    std::string cached_script_;
+    std::string cached_model_;
+};
+
+PythonSurrogateWorker& python_worker_singleton() {
+    static PythonSurrogateWorker worker;
+    return worker;
 }
 
 std::vector<double> parse_csv_doubles(const std::string& text) {
@@ -281,7 +553,8 @@ RegionSelection select_critical_regions_heuristic(const mesh::Grid2D& grid,
 
 RegionSelection select_critical_regions_surrogate_python(const mesh::Grid2D& grid,
                                                          const Field2D& coarse,
-                                                         const SimulationConfig& config) {
+                                                         const SimulationConfig& config,
+                                                         bool cached_worker_mode) {
     validate_2d_inputs(grid, coarse);
     if (config.surrogate_model_path.empty()) {
         throw std::runtime_error("decision_policy=surrogate_python requires surrogate_model_path");
@@ -316,21 +589,49 @@ RegionSelection select_critical_regions_surrogate_python(const mesh::Grid2D& gri
     const double min_fraction = std::clamp(
         std::max(config.min_critical_fraction, config.surrogate_top_fraction), 0.0, 1.0);
 
-    std::ostringstream cmd;
-    cmd << shell_quote(config.surrogate_python_executable)
-        << " " << shell_quote(config.surrogate_script_path)
-        << " --model " << shell_quote(config.surrogate_model_path)
-        << " --input " << shell_quote(coarse_path.string())
-        << " --output " << shell_quote(mask_path.string())
-        << " --min-fraction " << min_fraction
-        << " --score-threshold " << config.surrogate_score_threshold;
+    if (cached_worker_mode) {
+        try {
+            python_worker_singleton().run_inference(
+                config,
+                coarse_path,
+                mask_path,
+                min_fraction,
+                config.surrogate_score_threshold);
+        } catch (...) {
+            std::ostringstream cmd;
+            cmd << shell_quote(config.surrogate_python_executable)
+                << " " << shell_quote(config.surrogate_script_path)
+                << " --model " << shell_quote(config.surrogate_model_path)
+                << " --input " << shell_quote(coarse_path.string())
+                << " --output " << shell_quote(mask_path.string())
+                << " --min-fraction " << min_fraction
+                << " --score-threshold " << config.surrogate_score_threshold;
 
-    const int rc = std::system(cmd.str().c_str());
-    if (rc != 0) {
-        std::filesystem::remove(coarse_path);
-        std::filesystem::remove(mask_path);
-        throw std::runtime_error("Python surrogate mask generation failed with exit code " +
-                                 std::to_string(rc));
+            const int rc = std::system(cmd.str().c_str());
+            if (rc != 0) {
+                std::filesystem::remove(coarse_path);
+                std::filesystem::remove(mask_path);
+                throw std::runtime_error("Python surrogate mask generation failed with exit code " +
+                                         std::to_string(rc));
+            }
+        }
+    } else {
+        std::ostringstream cmd;
+        cmd << shell_quote(config.surrogate_python_executable)
+            << " " << shell_quote(config.surrogate_script_path)
+            << " --model " << shell_quote(config.surrogate_model_path)
+            << " --input " << shell_quote(coarse_path.string())
+            << " --output " << shell_quote(mask_path.string())
+            << " --min-fraction " << min_fraction
+            << " --score-threshold " << config.surrogate_score_threshold;
+
+        const int rc = std::system(cmd.str().c_str());
+        if (rc != 0) {
+            std::filesystem::remove(coarse_path);
+            std::filesystem::remove(mask_path);
+            throw std::runtime_error("Python surrogate mask generation failed with exit code " +
+                                     std::to_string(rc));
+        }
     }
 
     RegionSelection out;
@@ -506,30 +807,185 @@ RegionSelection3D select_critical_regions_heuristic(const mesh::Grid3D& grid,
     return out;
 }
 
+RegionSelection3D select_critical_regions_surrogate_python(const mesh::Grid3D& grid,
+                                                           const Field3D& coarse,
+                                                           const SimulationConfig& config,
+                                                           bool cached_worker_mode) {
+    if (coarse.size.x != grid.size.x || coarse.size.y != grid.size.y || coarse.size.z != grid.size.z) {
+        throw std::runtime_error("Decision core requires coarse field and 3D grid with matching size");
+    }
+    if (config.surrogate_model_path.empty()) {
+        throw std::runtime_error("decision_policy=surrogate_python requires surrogate_model_path");
+    }
+
+    const auto temp_root = config.surrogate_temp_dir.empty()
+        ? (std::filesystem::temp_directory_path() / "shardsim_surrogate_3d")
+        : std::filesystem::path(config.surrogate_temp_dir);
+    std::filesystem::create_directories(temp_root);
+
+    const auto stamp = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    const auto coarse_path = temp_root / ("coarse3d_" + std::to_string(stamp) + ".bin");
+    const auto mask_path = temp_root / ("mask3d_" + std::to_string(stamp) + ".bin");
+
+    {
+        std::ofstream out(coarse_path, std::ios::binary);
+        if (!out) {
+            throw std::runtime_error("Could not create surrogate 3D coarse input: " + coarse_path.string());
+        }
+        write_u32(out, kCoarseFieldMagic3D);
+        write_u32(out, kCoarseFieldVersion3D);
+        write_u64(out, static_cast<std::uint64_t>(coarse.size.x));
+        write_u64(out, static_cast<std::uint64_t>(coarse.size.y));
+        write_u64(out, static_cast<std::uint64_t>(coarse.size.z));
+        write_u64(out, static_cast<std::uint64_t>(coarse.values.size()));
+        out.write(reinterpret_cast<const char*>(coarse.values.data()),
+                  static_cast<std::streamsize>(coarse.values.size() * sizeof(double)));
+        if (!out) {
+            throw std::runtime_error("Failed to write surrogate 3D coarse input");
+        }
+    }
+
+    const double min_fraction = std::clamp(
+        std::max(config.min_critical_fraction, config.surrogate_top_fraction), 0.0, 1.0);
+
+    if (cached_worker_mode) {
+        try {
+            python_worker_singleton().run_inference(
+                config,
+                coarse_path,
+                mask_path,
+                min_fraction,
+                config.surrogate_score_threshold);
+        } catch (...) {
+            std::ostringstream cmd;
+            cmd << shell_quote(config.surrogate_python_executable)
+                << " " << shell_quote(config.surrogate_script_path)
+                << " --model " << shell_quote(config.surrogate_model_path)
+                << " --input " << shell_quote(coarse_path.string())
+                << " --output " << shell_quote(mask_path.string())
+                << " --min-fraction " << min_fraction
+                << " --score-threshold " << config.surrogate_score_threshold;
+
+            const int rc = std::system(cmd.str().c_str());
+            if (rc != 0) {
+                std::filesystem::remove(coarse_path);
+                std::filesystem::remove(mask_path);
+                throw std::runtime_error("Python surrogate 3D mask generation failed with exit code " +
+                                         std::to_string(rc));
+            }
+        }
+    } else {
+        std::ostringstream cmd;
+        cmd << shell_quote(config.surrogate_python_executable)
+            << " " << shell_quote(config.surrogate_script_path)
+            << " --model " << shell_quote(config.surrogate_model_path)
+            << " --input " << shell_quote(coarse_path.string())
+            << " --output " << shell_quote(mask_path.string())
+            << " --min-fraction " << min_fraction
+            << " --score-threshold " << config.surrogate_score_threshold;
+
+        const int rc = std::system(cmd.str().c_str());
+        if (rc != 0) {
+            std::filesystem::remove(coarse_path);
+            std::filesystem::remove(mask_path);
+            throw std::runtime_error("Python surrogate 3D mask generation failed with exit code " +
+                                     std::to_string(rc));
+        }
+    }
+
+    RegionSelection3D out;
+    out.mask.assign(coarse.size.x * coarse.size.y * coarse.size.z, 0);
+    {
+        std::ifstream in(mask_path, std::ios::binary);
+        if (!in) {
+            std::filesystem::remove(coarse_path);
+            throw std::runtime_error("Could not open surrogate 3D mask output: " + mask_path.string());
+        }
+
+        const auto magic = read_u32(in);
+        const auto version = read_u32(in);
+        const auto nx = read_u64(in);
+        const auto ny = read_u64(in);
+        const auto nz = read_u64(in);
+        const auto count = read_u64(in);
+        if (magic != kMaskMagic3D || version != kMaskVersion3D ||
+            nx != coarse.size.x || ny != coarse.size.y || nz != coarse.size.z || count != out.mask.size()) {
+            std::filesystem::remove(coarse_path);
+            std::filesystem::remove(mask_path);
+            throw std::runtime_error("Invalid surrogate 3D mask payload");
+        }
+
+        in.read(reinterpret_cast<char*>(out.mask.data()), static_cast<std::streamsize>(out.mask.size()));
+        if (!in) {
+            std::filesystem::remove(coarse_path);
+            std::filesystem::remove(mask_path);
+            throw std::runtime_error("Failed to read surrogate 3D mask payload");
+        }
+    }
+
+    std::filesystem::remove(coarse_path);
+    std::filesystem::remove(mask_path);
+
+    for (const auto value : out.mask) {
+        out.critical_cells += (value != 0U) ? 1U : 0U;
+    }
+    out.critical_fraction = static_cast<double>(out.critical_cells) /
+        static_cast<double>(coarse.size.x * coarse.size.y * coarse.size.z);
+    return out;
+}
+
 }  // namespace
 
 RegionSelection select_critical_regions(const mesh::Grid2D& grid,
                                         const Field2D& coarse,
                                         const SimulationConfig& config) {
+    RegionSelection out;
     if (config.decision_policy == "heuristic") {
-        return select_critical_regions_heuristic(grid, coarse, config);
+        out = select_critical_regions_heuristic(grid, coarse, config);
+    } else if (config.decision_policy == "surrogate_python") {
+        out = select_critical_regions_surrogate_python(grid, coarse, config, false);
+    } else if (config.decision_policy == "surrogate_python_cached") {
+        out = select_critical_regions_surrogate_python(grid, coarse, config, true);
+    } else if (config.decision_policy == "surrogate_linear") {
+        out = select_critical_regions_surrogate_linear(grid, coarse, config);
+    } else {
+        throw std::runtime_error("Unsupported decision_policy: " + config.decision_policy);
     }
-    if (config.decision_policy == "surrogate_python") {
-        return select_critical_regions_surrogate_python(grid, coarse, config);
+
+    // Phase 3: Pre-simulation overlay.  When presim_steps > 0 we run a fast
+    // coarsened heat solve and mark any cell whose uncertainty score exceeds
+    // refine_local_error_tau as critical, even if the base policy missed it.
+    if (config.presim_steps > 0) {
+        const auto presim_map = presim::run_presim(grid, config);
+        if (!presim_map.scores.empty() && presim_map.scores.size() == out.mask.size()) {
+            const double tau = std::max(config.refine_local_error_tau, 1.0e-6);
+            for (std::size_t k = 0; k < out.mask.size(); ++k) {
+                if (out.mask[k] == 0 && presim_map.scores[k] > tau) {
+                    out.mask[k] = 1;
+                    ++out.critical_cells;
+                }
+            }
+            out.critical_fraction = static_cast<double>(out.critical_cells) /
+                                    static_cast<double>(out.mask.size());
+        }
     }
-    if (config.decision_policy == "surrogate_linear") {
-        return select_critical_regions_surrogate_linear(grid, coarse, config);
-    }
-    throw std::runtime_error("Unsupported decision_policy: " + config.decision_policy);
+
+    return out;
 }
 
 RegionSelection3D select_critical_regions(const mesh::Grid3D& grid,
                                           const Field3D& coarse,
                                           const SimulationConfig& config) {
-    if (config.decision_policy != "heuristic") {
-        throw std::runtime_error("3D decision core currently supports only decision_policy=heuristic");
+    if (config.decision_policy == "heuristic") {
+        return select_critical_regions_heuristic(grid, coarse, config);
     }
-    return select_critical_regions_heuristic(grid, coarse, config);
+    if (config.decision_policy == "surrogate_python") {
+        return select_critical_regions_surrogate_python(grid, coarse, config, false);
+    }
+    if (config.decision_policy == "surrogate_python_cached") {
+        return select_critical_regions_surrogate_python(grid, coarse, config, true);
+    }
+    throw std::runtime_error("Unsupported 3D decision_policy: " + config.decision_policy);
 }
 
 }  // namespace shardsim::decision_core

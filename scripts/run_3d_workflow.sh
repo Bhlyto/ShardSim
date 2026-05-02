@@ -4,6 +4,23 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+resolve_python_exec() {
+  if [[ -n "${SHARDSIM_PYTHON:-}" ]]; then
+    printf '%s\n' "$SHARDSIM_PYTHON"
+    return
+  fi
+  if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
+    printf '%s\n' "${VIRTUAL_ENV}/bin/python"
+    return
+  fi
+  command -v python3 >/dev/null 2>&1 && { command -v python3; return; }
+  command -v python >/dev/null 2>&1 && { command -v python; return; }
+  echo "Error: no Python interpreter found (set SHARDSIM_PYTHON or activate a venv)" >&2
+  exit 1
+}
+
+PYTHON_EXEC="$(resolve_python_exec)"
+
 TRAIN_SCENARIOS="${TRAIN_SCENARIOS:-24}"
 EVAL_SCENARIOS="${EVAL_SCENARIOS:-8}"
 GRID_X="${GRID_X:-32}"
@@ -16,7 +33,7 @@ REPORT="${REPORT:-reports/surrogate_3d_eval.json}"
 
 mkdir -p "$OUT_DIR"
 
-/home/bhlyto/.venv/bin/python scripts/generate_paired_real_training_data.py \
+"$PYTHON_EXEC" scripts/generate_paired_real_training_data.py \
   --n-scenarios "$TRAIN_SCENARIOS" \
   --grid-size "$GRID_X" \
   --grid-z "$GRID_Z" \
@@ -25,7 +42,7 @@ mkdir -p "$OUT_DIR"
   --output-dir "$TRAIN_DIR" \
   --seed 20260412 | tee "$OUT_DIR/generate_train.log"
 
-/home/bhlyto/.venv/bin/python scripts/generate_paired_real_training_data.py \
+"$PYTHON_EXEC" scripts/generate_paired_real_training_data.py \
   --n-scenarios "$EVAL_SCENARIOS" \
   --grid-size "$GRID_X" \
   --grid-z "$GRID_Z" \
@@ -34,11 +51,11 @@ mkdir -p "$OUT_DIR"
   --output-dir "$EVAL_DIR" \
   --seed 20260413 | tee "$OUT_DIR/generate_eval.log"
 
-/home/bhlyto/.venv/bin/python scripts/train_surrogate_3d.py \
+"$PYTHON_EXEC" scripts/train_surrogate_3d.py \
   --paired-data-dir "$TRAIN_DIR" \
   --model-output "$MODEL" | tee "$OUT_DIR/train.log"
 
-/home/bhlyto/.venv/bin/python scripts/evaluate_surrogate_3d.py \
+"$PYTHON_EXEC" scripts/evaluate_surrogate_3d.py \
   --model "$MODEL" \
   --paired-data-dir "$EVAL_DIR" \
   --output "$REPORT" | tee "$OUT_DIR/eval.log"
