@@ -1,4 +1,4 @@
-# ShardSim / ChatMPI
+# ShardSim
 
 DomainSim: A Distributed Multi-Fidelity Simulation Framework with Domain-Specific Learning
 
@@ -15,7 +15,7 @@ DomainSim: A Distributed Multi-Fidelity Simulation Framework with Domain-Specifi
 
 ## Abstract
 
-We propose a conceptual framework for distributed scientific computing, named **ChatMPI**, intended to orchestrate multi-fidelity numerical simulations coupled with domain-specialized machine learning models. The central idea is to explicitly separate three layers: (i) a **decision core** responsible for domain decomposition, resource allocation, and triggering refinement; (ii) a **pre-simulation layer** producing approximate fields and an uncertainty map; (iii) a **simulation layer** with variable fidelity, composed of coarse and fine computations. A learning module trains from the discrepancies between approximate results and reference results to improve surrogate models. We also advocate a strong methodological principle: **one ML model per physical domain**. A model trained on thermal problems should not be expected to be valid for CFD, structural mechanics, or other domains whose constraints, invariants, and data structures differ deeply. We present a concrete experiment on 2D heat diffusion to evaluate potential gains in computational cost, accuracy, and overall efficiency.
+We propose a conceptual framework for distributed scientific computing, named **Sharsdim**, intended to orchestrate multi-fidelity numerical simulations coupled with domain-specialized machine learning models. The central idea is to explicitly separate three layers: (i) a **decision core** responsible for domain decomposition, resource allocation, and triggering refinement; (ii) a **pre-simulation layer** producing approximate fields and an uncertainty map; (iii) a **simulation layer** with variable fidelity, composed of coarse and fine computations. A learning module trains from the discrepancies between approximate results and reference results to improve surrogate models. We also advocate a strong methodological principle: **one ML model per physical domain**. A model trained on thermal problems should not be expected to be valid for CFD, structural mechanics, or other domains whose constraints, invariants, and data structures differ deeply. We present a concrete experiment on 2D heat diffusion to evaluate potential gains in computational cost, accuracy, and overall efficiency.
 
 **Keywords:** numerical simulation, HPC, MPI, multi-fidelity, surrogate model, error estimation, pre-simulation, scientific learning.
 
@@ -27,7 +27,7 @@ High-fidelity numerical simulations are a pillar of engineering sciences. They e
 
 Multi-fidelity and adaptive mesh refinement approaches have been widely studied to reduce this cost. At the same time, machine learning methods have shown their usefulness as surrogates or substitution models, able to quickly predict physical fields or error corrections. However, attempts at excessive generalization across multiple physical domains often lead to models that are not robust, hard to interpret, and sensitive to violations of physical constraints.
 
-The ChatMPI project formalizes a hybrid architecture that combines:
+The Sharsdim project formalizes a hybrid architecture that combines:
 - a central decision engine;
 - distributed simulation;
 - a fast pre-simulation;
@@ -52,7 +52,7 @@ This position is based on several observations:
 3. The training data distribution depends on the solver, boundary conditions, and geometry.
 4. Uncontrolled inter-domain generalization can produce non-physical outputs.
 
-Thus, ChatMPI does not seek a universal model, but a **constellation of specialized models**, each operating within its domain of expertise.
+Thus, Sharsdim does not seek a universal model, but a **constellation of specialized models**, each operating within its domain of expertise.
 
 ---
 
@@ -258,7 +258,7 @@ The entire grid is computed at high resolution.
 **B. Multi-fidelity without learning**  
 The coarse grid is complemented locally by fine zones.
 
-**C. Full ChatMPI**  
+**C. Full Sharsdim**  
 Pre-simulation + adaptive selection + local fine simulation + surrogate learning.
 
 ### 8.3 Metrics
@@ -281,7 +281,7 @@ $$
 We expect that:
 - the fine baseline gives the lowest error but the highest cost;
 - multi-fidelity reduces cost;
-- ChatMPI achieves a superior cost-accuracy tradeoff;
+- Sharsdim achieves a superior cost-accuracy tradeoff;
 - the surrogate improves over iterations.
 
 ---
@@ -310,7 +310,7 @@ This experiment serves to methodologically justify model specialization.
 
 ## 10. Discussion
 
-The ChatMPI framework rests on a clear distinction between:
+The Sharsdim framework rests on a clear distinction between:
 - **physical computation**;
 - **allocation decision**;
 - **correction learning**.
@@ -343,7 +343,7 @@ In particular, the illusion of a universal model must be avoided. The ML model i
 
 ## 12. Conclusion
 
-We proposed a conceptual framework for a distributed adaptive scientific simulation system called ChatMPI. Its architecture relies on a decision core, a pre-simulation, multi-fidelity simulations, and a domain-specialized learning module. The guiding principle is explicit: **an ML model should not be expected to be universal, but as an expert for a given physical domain**.
+We proposed a conceptual framework for a distributed adaptive scientific simulation system called Sharsdim. Its architecture relies on a decision core, a pre-simulation, multi-fidelity simulations, and a domain-specialized learning module. The guiding principle is explicit: **an ML model should not be expected to be universal, but as an expert for a given physical domain**.
 
 The proposed experiment on 2D heat diffusion offers a concrete basis to measure gains in accuracy and cost. This framework provides a solid foundation for future research in distributed scientific computing, numerical optimization, and physics-informed learning.
 
