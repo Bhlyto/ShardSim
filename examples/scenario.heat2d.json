@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "heat-gaussian-demo",
+  "model": "heat-2d",
+  "parameters": {
+    "alpha": 0.02,
+    "t_end": 0.03,
+    "extent": [1.0, 1.0]
+  },
+  "initial_conditions": {
+    "type": "gaussian",
+    "shape": [65, 65],
+    "center": [0.5, 0.5],
+    "sigma": [0.09, 0.09],
+    "amplitude": 1.0,
+    "baseline": 0.0
+  },
+  "boundary_conditions": {
+    "top": 0.0,
+    "bottom": 0.0,
+    "left": 0.0,
+    "right": 0.0
+  },
+  "solver": {
+    "backend": "internal",
+    "grid_shape": [65, 65],
+    "safety_factor": 0.9
+  },
+  "seed": null,
+  "metadata": {
+    "description": "Centered Gaussian heat diffusion V1 example"
+  }
+}
