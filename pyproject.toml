@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shardsim"
+version = "1.0.0"
+description = "Reproducible physical simulation runner"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.scripts]
+shardsim = "shardsim.cli:main"
+shardsim-campaign = "shardsim.campaign.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+cnn = [
+    "torch>=2.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
